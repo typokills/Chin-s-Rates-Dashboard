@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import sys,json;d=json.load(sys.stdin);fp=d.get('tool_input',{}).get('file_path','');r={'hookSpecificOutput':{'hookEventName':'PreToolUse','additionalContext':'DASHBOARD RULE: Never introduce hardcoded fallback or indicative market values. When Bloomberg is not connected, the dashboard must show N/A. Use empty dicts and _empty_fig() only — no IND fallback dicts, no hardcoded yield numbers, rates, or macro data as defaults. The bbg.ok branch in get_data() already handles the no-Bloomberg case correctly.'}} if any(x in fp for x in ['Claude Code Testing','fixed_income','home_claude']) else None;print(json.dumps(r)) if r else None\"",
+            "statusMessage": "Checking dashboard data rules..."
+          }
+        ]
+      }
+    ]
+  }
+}
