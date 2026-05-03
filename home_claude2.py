@@ -5523,9 +5523,9 @@ def build_carry_charts_panel(data: Dict, hedge_base: str = "unhedged") -> html.D
             range=[-0.5, cursor - GAP_WIDTH - 0.5],
         ),
         annotations=annotations2,
-        legend=dict(orientation="h", y=1.22, x=0,
+        legend=dict(orientation="h", y=-0.3, x=0,
                     font=dict(size=9, family=FONT_FAMILY)),
-        height=360, margin=dict(t=90, b=60),
+        height=360, margin=dict(t=60, b=100),
         barmode="relative",
     )
 
