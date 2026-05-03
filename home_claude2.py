@@ -29,7 +29,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 import dash
-from dash import dcc, html, dash_table, Input, Output, State, callback_context
+from dash import dcc, html, dash_table, Input, Output, State, ctx
 import dash_bootstrap_components as dbc
 
 warnings.filterwarnings("ignore")
@@ -296,19 +296,6 @@ FX_TICKERS = {
     "CADJPY": "CADJPY Curncy",  # ✅
 }
 
-# ⚠️ Cross-currency basis swaps — ALL require terminal verification
-# Standard naming convention in BBG: {CCY}BS{TENOR} Curncy
-# e.g. USDBS3M Curncy for USD/JPY 3M x-ccy basis vs JPY
-# Xccy basis computed as JPYI3M CURNCY minus the foreign 3M rate
-XCCY_BASIS_TICKERS = {
-    "USD/JPY 3M": "JPYI3M Curncy - TSFR3M Index",
-    "SGD/JPY 3M": "JPYI3M Curncy - SGDI3M Curncy",
-    "EUR/JPY 3M": "JPYI3M Curncy - EURI3M Curncy",
-    "GBP/JPY 3M": "JPYI3M Curncy - GBPI3M Curncy",
-    "AUD/JPY 3M": "JPYI3M Curncy - AUDI3M Curncy",
-    "CAD/JPY 3M": "JPYI3M Curncy - CADI3M Curncy",
-}
-
 # JPY hedge cost = JPYI3M CURNCY minus the foreign 3M rate
 JPY_HEDGE_COST_TICKERS = {
     "US":        "TSFR3M Index",    # SOFR 3M compounded
@@ -387,8 +374,6 @@ INFL_SWAP_TICKERS = {
         "UK":  "BPSWIF5 Curncy",    # ⚠️ Verify — UK 5Y5Y
     },
 }
-
-TICKERS_NEEDING_VERIFICATION = []
 
 # ==========================================================================
 #  OIS POLICY PATH TICKERS
@@ -562,9 +547,9 @@ class BBGFetcher:
                             rows[sec] = {}
                             for f in fields:
                                 try:    rows[sec][f] = fd.getElementAsFloat(f)
-                                except:
+                                except Exception:
                                     try:    rows[sec][f] = fd.getElementAsString(f)
-                                    except: rows[sec][f] = None
+                                    except Exception: rows[sec][f] = None
                 if ev.eventType() == blpapi.Event.RESPONSE:
                     break
             return pd.DataFrame(rows).T
@@ -599,7 +584,7 @@ class BBGFetcher:
                             pt = fda.getValue(i)
                             dates.append(pt.getElementAsDatetime("date"))
                             try:    vals.append(pt.getElementAsFloat(field))
-                            except: vals.append(np.nan)
+                            except Exception: vals.append(np.nan)
                         data[tkr] = pd.Series(vals, index=pd.DatetimeIndex(dates))
                 if ev.eventType() == blpapi.Event.RESPONSE:
                     break
@@ -804,15 +789,7 @@ def fetch_jpy_hedge_costs_bbg() -> Dict:
 def fetch_xccy_basis_bbg() -> Dict:
 
     """Xccy basis vs JPY = JPYI3M minus the foreign 3M rate."""
-    pair_map = {
-        "USD/JPY 3M": "TSFR3M Index",
-        "SGD/JPY 3M": "SGDI3M Curncy",
-        "EUR/JPY 3M": "EURI3M Curncy",
-        "GBP/JPY 3M": "GBPI3M Curncy",
-        "AUD/JPY 3M": "AUDI3M Curncy",
-        "CAD/JPY 3M": "CADI3M Curncy",
-    }
-    all_tickers = list(set(pair_map.values())) + [JPY_3M_RATE_TICKER]
+    all_tickers = list(set(_XCCY_JPY_PAIR_MAP.values())) + [JPY_3M_RATE_TICKER]
     df = bbg.bdp(all_tickers, ["PX_LAST"])
     result = {}
     if df.empty:
@@ -823,7 +800,7 @@ def fetch_xccy_basis_bbg() -> Dict:
     except (KeyError, ValueError):
         print(f"  ⚠️ BBG xccy basis (JPY): could not fetch JPY 3M rate ({JPY_3M_RATE_TICKER})")
         return result
-    for pair, tkr in pair_map.items():
+    for pair, tkr in _XCCY_JPY_PAIR_MAP.items():
         try:
             foreign3m = float(df.loc[tkr, "PX_LAST"])
             result[pair] = round(jpy3m - foreign3m, 4)
@@ -833,19 +810,29 @@ def fetch_xccy_basis_bbg() -> Dict:
 
 SGD_3M_RATE_TICKER = "SGDI3M Curncy"
 
+# Xccy basis pair maps — single source of truth used by fetch functions and Ticker Reference tab
+_XCCY_JPY_PAIR_MAP = {
+    "USD/JPY 3M": "TSFR3M Index",
+    "SGD/JPY 3M": "SGDI3M Curncy",
+    "EUR/JPY 3M": "EURI3M Curncy",
+    "GBP/JPY 3M": "GBPI3M Curncy",
+    "AUD/JPY 3M": "AUDI3M Curncy",
+    "CAD/JPY 3M": "CADI3M Curncy",
+}
+_XCCY_SGD_PAIR_MAP = {
+    "USD/SGD 3M": "TSFR3M Index",
+    "JPY/SGD 3M": "JPYI3M Curncy",
+    "EUR/SGD 3M": "EURI3M Curncy",
+    "GBP/SGD 3M": "GBPI3M Curncy",
+    "AUD/SGD 3M": "AUDI3M Curncy",
+    "CAD/SGD 3M": "CADI3M Curncy",
+}
+
 
 def fetch_xccy_basis_sgd_bbg() -> Dict:
 
     """Xccy basis vs SGD = SGDI3M minus the foreign 3M rate."""
-    pair_map = {
-        "USD/SGD 3M": "TSFR3M Index",
-        "JPY/SGD 3M": "JPYI3M Curncy",
-        "EUR/SGD 3M": "EURI3M Curncy",
-        "GBP/SGD 3M": "GBPI3M Curncy",
-        "AUD/SGD 3M": "AUDI3M Curncy",
-        "CAD/SGD 3M": "CADI3M Curncy",
-    }
-    all_tickers = list(set(pair_map.values())) + [SGD_3M_RATE_TICKER]
+    all_tickers = list(set(_XCCY_SGD_PAIR_MAP.values())) + [SGD_3M_RATE_TICKER]
     df = bbg.bdp(all_tickers, ["PX_LAST"])
     result = {}
     if df.empty:
@@ -856,7 +843,7 @@ def fetch_xccy_basis_sgd_bbg() -> Dict:
     except (KeyError, ValueError):
         print(f"  ⚠️ BBG xccy basis (SGD): could not fetch SGD 3M rate ({SGD_3M_RATE_TICKER})")
         return result
-    for pair, tkr in pair_map.items():
+    for pair, tkr in _XCCY_SGD_PAIR_MAP.items():
         try:
             foreign3m = float(df.loc[tkr, "PX_LAST"])
             result[pair] = round(sgd3m - foreign3m, 4)
@@ -1095,19 +1082,41 @@ def get_data() -> Dict:
     }
 
 
-_HIST_DF_CACHE: Dict[tuple, "pd.DataFrame"] = {}
+_HIST_DF_CACHE: Dict[tuple, pd.DataFrame] = {}
+_HIST_DF_CACHE_TS: Dict[tuple, float] = {}
+_CACHE_TTL_SECONDS = 4 * 3600  # 4 hours
 
 def get_hist_df(tenor: str = "10Y", days: int = 504) -> pd.DataFrame:
     """Get historical yield DF from Bloomberg. Caches results so callbacks
-    never make redundant BBG bdh calls after the first fetch."""
+    never make redundant BBG bdh calls after the first fetch. Cache expires
+    after 4 hours to prevent stale data in long-running sessions."""
     if not bbg.ok:
         return pd.DataFrame()
     key = (tenor, days)
-    if key in _HIST_DF_CACHE:
+    now = datetime.now().timestamp()
+    if key in _HIST_DF_CACHE and (now - _HIST_DF_CACHE_TS.get(key, 0)) < _CACHE_TTL_SECONDS:
         return _HIST_DF_CACHE[key]
     df = fetch_hist_yields_bbg(tenor, days)
     result = df if df is not None else pd.DataFrame()
     _HIST_DF_CACHE[key] = result
+    _HIST_DF_CACHE_TS[key] = now
+    return result
+
+
+_REAL_YIELD_CACHE: Dict[tuple, pd.DataFrame] = {}
+_REAL_YIELD_CACHE_TS: Dict[tuple, float] = {}
+
+def get_real_yield_hist_df(tenor: str = "10Y", days: int = 504) -> pd.DataFrame:
+    """Cached wrapper for fetch_real_yield_history_bbg. Prevents direct Bloomberg
+    calls inside chart render functions by caching with a 4-hour TTL."""
+    key = (tenor, days)
+    now = datetime.now().timestamp()
+    if key in _REAL_YIELD_CACHE and (now - _REAL_YIELD_CACHE_TS.get(key, 0)) < _CACHE_TTL_SECONDS:
+        return _REAL_YIELD_CACHE[key]
+    df = fetch_real_yield_history_bbg(tenor, days)
+    result = df if df is not None else pd.DataFrame()
+    _REAL_YIELD_CACHE[key] = result
+    _REAL_YIELD_CACHE_TS[key] = now
     return result
 
 
@@ -1567,7 +1576,7 @@ def generate_ideas_from_data(data: Dict) -> List[Dict]:
 def _ind_tag(data: Dict) -> str:
 
     """Returns a warning tag string when data is indicative (Bloomberg not connected)."""
-    if "Indicative" in data.get("source", ""):
+    if not bbg.ok:
         return "  ⚠️ IND"
     return ""
 
@@ -1998,7 +2007,6 @@ def chart_hedged_yield_heatmap(data: Dict) -> go.Figure:
     Hedge cost is tenor-agnostic (3M FX forward cost applied uniformly).
     Green = high hedged yield vs JGB; Red = low / negative pickup.
     """
-    # tenors   = ["2Y", "5Y", "10Y", "30Y"]
     tenors   = ["2Y", "5Y", "10Y",]
     hc       = data["hedge_costs"]
     jgb_by_t = {t: data["yields"].get(t, {}).get("Japan") for t in tenors}
@@ -2086,7 +2094,6 @@ def chart_hedged_yield_heatmap_sgd(data: Dict) -> go.Figure:
     Heatmap: countries (rows) × tenors (cols) showing SGD-hedged yield.
     Hedge cost is tenor-agnostic (3M FX forward cost applied uniformly).
     """
-    # tenors   = ["2Y", "5Y", "10Y", "30Y"]
     tenors   = ["2Y", "5Y", "10Y", ]
     hc       = data["sgd_hedge_costs"]
     sgs_by_t = {t: data["yields"].get(t, {}).get("Singapore") for t in tenors}
@@ -2200,9 +2207,7 @@ def chart_macro_heatmap(data: Dict, zscores: Dict = None, countries: List[str] =
         hovertemplate="%{customdata}<extra></extra>",
         colorscale=[
             [0.00, "#1a7c1a"],  # dark green  (z ≤ -3)
-            # [0.25, "#1e3a5f"],  # blue        (z = -1.5)
             [0.50, "#1a1a2e"],  # neutral dark(z =  0)
-            # [0.75, "#ef4444"],  # red         (z = +1.5)
             [1.00, "#8b0000"],  # dark red    (z ≥ +3)
         ],
         zmid=0,
@@ -3125,8 +3130,8 @@ def chart_real_yield_vs_pmi(data: Dict, macro_history: Dict) -> go.Figure:
     hist_pmi_s  = None
     if macro_history:
         hist_pmi_s = macro_history.get("PMI_MFG", {}).get("US")
-    # Historical real yields come from fetch_real_yield_history_bbg
-    hist_ry_df = fetch_real_yield_history_bbg("10Y", days=504)
+    # Historical real yields — use cached wrapper to avoid live BBG call in chart renderer
+    hist_ry_df = get_real_yield_hist_df("10Y", days=504)
 
     if hist_ry_df is None or hist_pmi_s is None or hist_pmi_s.empty:
         # No history: simple scatter with just current point
@@ -3236,8 +3241,7 @@ def chart_be_seasonality(data: Dict) -> go.Figure:
         hovertemplate="<b>%{x}</b><br>Avg change: %{y:+.1f} bps<extra></extra>",
     ))
     # Current month marker
-    from datetime import datetime as _dt
-    curr_month_idx = _dt.today().month - 1
+    curr_month_idx = datetime.today().month - 1
     if curr_be is not None:
         fig.add_vline(x=months[curr_month_idx], line_dash="dash",
                       line_color=YELLOW, opacity=0.7,
@@ -4131,9 +4135,7 @@ def chart_yield_spread_heatmap(data: Dict, countries_sel: List[str] = None) -> g
     ylabels = [f"{FLAGS.get(c,'')} {c}" for c in countries]
     colorscale = [
         [0.00, "#8b0000"],   # dark red   (z ≤ −3, spread very tight/negative)
-        # [0.25, "#EF4444"],   # bright red (z ≈ −1.5)
         [0.50, "#1E2535"],   # neutral    (z = 0)
-        # [0.75, "#22C55E"],   # green      (z ≈ +1.5)
         [1.00, "#1a7c1a"],   # dark green (z ≥ +3, spread historically wide)
     ]
     fig = go.Figure(go.Heatmap(
@@ -4961,12 +4963,711 @@ def _safe_spread_panel(data: Dict):
                                "padding": "12px", "fontSize": "12px"})
 
 # ==========================================================================
+#  MACRO SURPRISE + MULTI-SIGNAL SCORECARD
+# ==========================================================================
+
+# CB inflation targets (%)
+CB_INFLATION_TARGETS = {
+    "US": 2.0, "UK": 2.0, "Germany": 2.0, "France": 2.0, "Italy": 2.0,
+    "Japan": 2.0, "Australia": 2.5, "Canada": 2.0, "Singapore": 2.0,
+}
+
+# Country → OIS CB key (None = no OIS data)
+_COUNTRY_TO_CB = {
+    "US": "US", "UK": "UK", "Australia": "Australia",
+    "Japan": "Japan", "Canada": "Canada",
+    "Germany": "ECB", "France": "ECB", "Italy": "ECB",
+    "Singapore": None,
+}
+
+
+def _score_label(s: int) -> str:
+    """Convert integer score to ▲▼ label string."""
+    if s >= 2:   return f"+{s} ▲▲"
+    if s == 1:   return f"+{s} ▲"
+    if s == 0:   return " 0 —"
+    if s == -1:  return f"{s} ▼"
+    return f"{s} ▼▼"
+
+
+def _score_color(s) -> str:
+    if not isinstance(s, (int, float)):
+        return TEXT_MUT
+    if s >= 2:   return GREEN
+    if s == 1:   return "#86EFAC"
+    if s == 0:   return TEXT_MUT
+    if s == -1:  return "#FCA5A5"
+    return RED
+
+
+def compute_macro_surprise(data: Dict) -> Dict:
+    """
+    Per-country macro surprise scores for bond investors:
+      CPI vs CB target  → negative deviation = dovish = bullish bonds (+2 to -2)
+      PMI vs 50         → contraction = cuts expected = bullish bonds (+2 to -2)
+    Returns {country: {cpi, target, cpi_dev, cpi_score, pmi, pmi_score, macro_score}}
+    """
+    results = {}
+    macro = data["macro"]
+    for country in COUNTRIES:
+        cpi    = _get_cpi(macro, country)
+        pmi    = macro.get("PMI_MFG", {}).get(country)
+        target = CB_INFLATION_TARGETS.get(country, 2.0)
+        cpi_dev, cpi_score = None, 0
+        if cpi is not None:
+            cpi_dev = round(cpi - target, 2)
+            if cpi_dev < -0.5:   cpi_score = +2
+            elif cpi_dev < 0.0:  cpi_score = +1
+            elif cpi_dev < 0.5:  cpi_score =  0
+            elif cpi_dev < 1.5:  cpi_score = -1
+            else:                cpi_score = -2
+        pmi_score = 0
+        if pmi is not None:
+            if pmi < 47:         pmi_score = +2
+            elif pmi < 50:       pmi_score = +1
+            elif pmi <= 50.5:    pmi_score =  0
+            elif pmi < 52:       pmi_score = -1
+            else:                pmi_score = -2
+        results[country] = {
+            "cpi": cpi, "target": target, "cpi_dev": cpi_dev,
+            "cpi_score": cpi_score,
+            "pmi": pmi, "pmi_score": pmi_score,
+            "macro_score": cpi_score + pmi_score,
+        }
+    return results
+
+
+def compute_multi_signal_scorecard(data: Dict, hedge_base: str = "unhedged") -> List[Dict]:
+    """
+    Five-signal conviction scorecard per country (each signal –2 to +2):
+      1. CPI surprise  — CPI vs CB target
+      2. PMI signal    — PMI vs 50
+      3. Yield z-score — 10Y yield cheap/rich vs 5Y history
+      4. Policy path   — OIS-implied 12M rate change
+      5. Carry rank    — 10Y carry+roll vs peers, adjusted for hedge_base
+    Total range: –10 to +10
+    """
+    macro_surp = compute_macro_surprise(data)
+    macro      = data["macro"]
+    ois_path   = data.get("ois_path", {})
+    y10        = data["yields"].get("10Y", {})
+
+    # ── Signal 3: yield z-score vs 5Y history ─────────────────────────────
+    hist_df = get_hist_df("10Y", days=1260)
+    yield_z = {}
+    for c in COUNTRIES:
+        yld = y10.get(c)
+        if yld is None or hist_df.empty or c not in hist_df.columns:
+            yield_z[c] = None; continue
+        h = hist_df[c].dropna()
+        if len(h) < 20:
+            yield_z[c] = None; continue
+        mu, sigma = h.mean(), h.std()
+        yield_z[c] = round((yld - mu) / sigma, 2) if sigma > 0 else 0.0
+
+    # ── Signal 4: OIS policy path — implied 12M rate change (bps) ─────────
+    policy_delta = {}
+    for c in COUNTRIES:
+        cb = _COUNTRY_TO_CB.get(c)
+        if cb is None:
+            policy_delta[c] = None; continue
+        ois_12m = ois_path.get(cb, {}).get("12M")
+        rate    = _get_rate(macro, c)
+        if ois_12m is None or rate is None:
+            policy_delta[c] = None; continue
+        policy_delta[c] = round((ois_12m - rate) * 100, 1)
+
+    # ── Signal 5: carry rank quintiles (hedge-adjusted) ───────────────────
+    carry_rows = compute_carry_rolldown(data, hedge_base)
+    carry_10y  = {r["Country"]: r["_total_sort"]
+                  for r in carry_rows if r["Tenor"] == "10Y"
+                  and isinstance(r["_total_sort"], (int, float))}
+    sorted_carry = sorted(carry_10y.items(), key=lambda x: x[1], reverse=True)
+    n = len(sorted_carry)
+    carry_rank = {c: i for i, (c, _) in enumerate(sorted_carry)}  # 0 = best
+
+    def _carry_score(c):
+        if c not in carry_rank or n == 0:
+            return 0
+        r = carry_rank[c]
+        if r < n * 0.2:    return +2
+        if r < n * 0.4:    return +1
+        if r < n * 0.6:    return  0
+        if r < n * 0.8:    return -1
+        return -2
+
+    rows = []
+    for country in COUNTRIES:
+        ms  = macro_surp.get(country, {})
+        cpi_sc  = ms.get("cpi_score", 0)
+        pmi_sc  = ms.get("pmi_score", 0)
+        yz      = yield_z.get(country)
+        ps      = policy_delta.get(country)
+        carry_v = carry_10y.get(country)
+
+        # Yield z-score → score
+        yz_score = 0
+        if yz is not None:
+            if yz > 1.5:     yz_score = +2
+            elif yz > 0.5:   yz_score = +1
+            elif yz > -0.5:  yz_score =  0
+            elif yz > -1.5:  yz_score = -1
+            else:            yz_score = -2
+
+        # Policy path → score (negative delta = cuts = bullish)
+        ps_score = 0
+        if ps is not None:
+            if ps < -50:    ps_score = +2
+            elif ps < -10:  ps_score = +1
+            elif ps < 10:   ps_score =  0
+            elif ps < 25:   ps_score = -1
+            else:           ps_score = -2
+
+        carry_sc = _carry_score(country)
+        total    = cpi_sc + pmi_sc + yz_score + ps_score + carry_sc
+
+        rows.append({
+            "country":         country,
+            "flag":            FLAGS.get(country, ""),
+            "cpi":             ms.get("cpi"),
+            "cpi_dev":         ms.get("cpi_dev"),
+            "cpi_score":       cpi_sc,
+            "pmi":             ms.get("pmi"),
+            "pmi_score":       pmi_sc,
+            "yield_z":         yz,
+            "yz_score":        yz_score,
+            "policy_delta":    ps,
+            "ps_score":        ps_score,
+            "carry_1y":        round(carry_v, 0) if carry_v is not None else None,
+            "carry_score":     carry_sc,
+            "total":           total,
+        })
+
+    rows.sort(key=lambda r: r["total"], reverse=True)
+    return rows
+
+
+def _conviction_badge(total: int) -> str:
+    if total >= 6:   return "STRONG BUY"
+    if total >= 3:   return "BUY"
+    if total >= 1:   return "MILD BUY"
+    if total == 0:   return "NEUTRAL"
+    if total >= -2:  return "MILD SELL"
+    if total >= -5:  return "SELL"
+    return "STRONG SELL"
+
+
+def _conviction_color(total: int) -> str:
+    if total >= 3:   return GREEN
+    if total >= 1:   return "#86EFAC"
+    if total == 0:   return TEXT_MUT
+    if total >= -2:  return "#FCA5A5"
+    return RED
+
+
+def build_macro_surprise_panel(data: Dict) -> html.Div:
+    """
+    Table: country × (CPI, target, deviation, CPI score, PMI, PMI score, macro score).
+    Color-coded by score direction.
+    """
+    ms = compute_macro_surprise(data)
+    rows = []
+    for c in COUNTRIES:
+        d = ms.get(c, {})
+        cpi_dev = d.get("cpi_dev")
+        cpi_sc  = d.get("cpi_score", 0)
+        pmi_sc  = d.get("pmi_score", 0)
+        mac_sc  = d.get("macro_score", 0)
+        rows.append({
+            "Country":     f"{FLAGS.get(c,'')} {c}",
+            "CPI (%)":     f"{d['cpi']:.1f}" if d.get("cpi") is not None else "N/A",
+            "Target (%)":  f"{d['target']:.1f}",
+            "CPI Dev (pp)": f"{cpi_dev:+.2f}" if cpi_dev is not None else "N/A",
+            "CPI Signal":  _score_label(cpi_sc),
+            "PMI":         f"{d['pmi']:.1f}" if d.get("pmi") is not None else "N/A",
+            "PMI Signal":  _score_label(pmi_sc),
+            "Macro Score": f"{mac_sc:+d}",
+            "_cpi_sc":  cpi_sc,
+            "_pmi_sc":  pmi_sc,
+            "_mac_sc":  mac_sc,
+        })
+    rows.sort(key=lambda r: r["_mac_sc"], reverse=True)
+
+    DISP = ["Country", "CPI (%)", "Target (%)", "CPI Dev (pp)",
+            "CPI Signal", "PMI", "PMI Signal", "Macro Score"]
+    style_cond = []
+    for i, r in enumerate(rows):
+        for col, sc_key in [("CPI Signal", "_cpi_sc"),
+                             ("PMI Signal", "_pmi_sc"),
+                             ("Macro Score", "_mac_sc")]:
+            clr = _score_color(r[sc_key])
+            style_cond.append({"if": {"row_index": i, "column_id": col},
+                                "color": clr, "fontWeight": "600"})
+
+    return dash_table.DataTable(
+        data=[{k: v for k, v in r.items() if not k.startswith("_")} for r in rows],
+        columns=[{"name": c, "id": c} for c in DISP],
+        style_table={"overflowX": "auto", "backgroundColor": BG_DEEP,
+                     "border": f"1px solid {BORDER}", "borderRadius": "6px"},
+        style_cell={"backgroundColor": BG_DEEP, "color": TEXT,
+                    "border": f"1px solid {BORDER}",
+                    "fontFamily": FONT_FAMILY, "fontSize": "12px",
+                    "textAlign": "center", "padding": "8px 10px"},
+        style_header={"backgroundColor": BG_CARD2, "color": ACCENT,
+                      "fontWeight": "bold", "border": f"1px solid {BORDER_LT}",
+                      "fontFamily": FONT_FAMILY, "fontSize": "11px",
+                      "textAlign": "center", "padding": "8px 10px"},
+        style_data_conditional=style_cond,
+        page_size=len(rows),
+    )
+
+
+def build_scorecard_panel(data: Dict, hedge_base: str = "unhedged") -> html.Div:
+    """
+    Left: signal-breakdown table (one row per country, sorted by total).
+    Right: horizontal bar chart ranked by total conviction score.
+    """
+    sc_rows = compute_multi_signal_scorecard(data, hedge_base)
+    if not sc_rows:
+        return html.P("No data.", style={"color": TEXT_MUT})
+
+    DISP_COLS = ["Country", "CPI Sig", "PMI Sig",
+                 "Yield Z Sig", "Path Sig", "Carry Sig", "Total", "View"]
+    tbl_data, style_cond = [], []
+    for i, r in enumerate(sc_rows):
+        total = r["total"]
+        badge = _conviction_badge(total)
+        tbl_data.append({
+            "Country":     f"{r['flag']} {r['country']}",
+            "CPI Sig":     _score_label(r["cpi_score"]),
+            "PMI Sig":     _score_label(r["pmi_score"]),
+            "Yield Z Sig": (_score_label(r["yz_score"])
+                            + (f"  ({r['yield_z']:+.2f}σ)" if r["yield_z"] is not None else "")),
+            "Path Sig":    (_score_label(r["ps_score"])
+                            + (f"  ({r['policy_delta']:+.0f}bps)" if r["policy_delta"] is not None else "")),
+            "Carry Sig":   (_score_label(r["carry_score"])
+                            + (f"  ({r['carry_1y']:+.0f}bps)" if r["carry_1y"] is not None else "")),
+            "Total":       f"{total:+d}",
+            "View":        badge,
+        })
+        tc = _conviction_color(total)
+        style_cond += [
+            {"if": {"row_index": i, "column_id": "Total"}, "color": tc, "fontWeight": "700"},
+            {"if": {"row_index": i, "column_id": "View"},  "color": tc, "fontWeight": "600"},
+        ]
+        for col, sc_key in [("CPI Sig", "cpi_score"), ("PMI Sig", "pmi_score"),
+                             ("Yield Z Sig", "yz_score"), ("Path Sig", "ps_score"),
+                             ("Carry Sig", "carry_score")]:
+            style_cond.append({"if": {"row_index": i, "column_id": col},
+                                "color": _score_color(r[sc_key])})
+
+    table = dash_table.DataTable(
+        data=tbl_data,
+        columns=[{"name": c, "id": c} for c in DISP_COLS],
+        style_table={"overflowX": "auto", "backgroundColor": BG_DEEP,
+                     "border": f"1px solid {BORDER}", "borderRadius": "6px"},
+        style_cell={"backgroundColor": BG_DEEP, "color": TEXT,
+                    "border": f"1px solid {BORDER}",
+                    "fontFamily": FONT_FAMILY, "fontSize": "12px",
+                    "textAlign": "center", "padding": "8px 10px"},
+        style_header={"backgroundColor": BG_CARD2, "color": ACCENT,
+                      "fontWeight": "bold", "border": f"1px solid {BORDER_LT}",
+                      "fontFamily": FONT_FAMILY, "fontSize": "11px",
+                      "textAlign": "center", "padding": "8px 10px"},
+        style_data_conditional=style_cond,
+        page_size=len(tbl_data),
+    )
+
+    # ── Conviction bar chart ───────────────────────────────────────────────
+    labels = [f"{r['flag']} {r['country']}" for r in sc_rows]
+    totals = [r["total"] for r in sc_rows]
+    colors = [_conviction_color(t) for t in totals]
+    fig = go.Figure(go.Bar(
+        y=labels, x=totals,
+        orientation="h",
+        marker_color=colors,
+        text=[f"{t:+d}  {_conviction_badge(t)}" for t in totals],
+        textposition="outside",
+        textfont=dict(size=10, family=FONT_FAMILY, color=TEXT),
+        hovertemplate="<b>%{y}</b><br>Score: %{x:+d}<extra></extra>",
+    ))
+    fig.add_vline(x=0, line_color=BORDER_LT, line_width=1)
+    fig.update_layout(
+        title="Conviction Ranking (–10 to +10)",
+        xaxis=dict(range=[-11, 14], zeroline=False,
+                   tickfont=dict(size=9, family=FONT_FAMILY)),
+        yaxis=dict(autorange="reversed",
+                   tickfont=dict(size=11, family=FONT_FAMILY)),
+        height=320, margin=dict(l=20, r=120, t=40, b=20),
+    )
+
+    return html.Div([
+        dbc.Row([
+            dbc.Col(table, width=8),
+            dbc.Col(dcc.Graph(figure=_dark(fig), config=GRAPH_CFG), width=4),
+        ]),
+    ])
+
+
+# ==========================================================================
+#  CARRY / ROLL-DOWN TABLE
+# ==========================================================================
+
+# Approximate par-bond modified durations for screening purposes
+_CARRY_DUR = {"2Y": 1.9, "5Y": 4.4, "10Y": 8.2, "30Y": 18.5}
+
+
+def compute_carry_rolldown(data: Dict, hedge_base: str = "unhedged") -> List[Dict]:
+    """
+    For each country × tenor compute:
+      • Carry (bps)        = yield × 100  (unhedged)
+                             or (yield + hedge_cost) × 100  (JPY / SGD hedged)
+      • Roll-down Δy (bps) = yield drop as bond ages 1Y along the curve
+                             (roll-down is yield-curve arithmetic — unaffected by hedging)
+      • Roll Return (bps)  = approx_duration × roll_Δy_in_pct × 100
+      • Total 1Y (bps)     = Carry + Roll Return
+
+    hedge_base: "unhedged" | "jpy" | "sgd"
+    """
+    # Hedge cost dicts: country → cost in same % units as yields (can be negative)
+    # The base-currency country has a hedge cost of 0 (no FX hedge needed for domestic bonds)
+    if hedge_base == "jpy":
+        hcosts   = data.get("hedge_costs", {})
+        zero_hc  = {"Japan"}        # JPY investor in JGBs: hedge cost = 0
+    elif hedge_base == "sgd":
+        hcosts   = data.get("sgd_hedge_costs", {})
+        zero_hc  = {"Singapore"}    # SGD investor in SGS: hedge cost = 0
+    else:
+        hcosts   = {}
+        zero_hc  = set()
+
+    rows = []
+    tenors = ["2Y", "5Y", "10Y", "30Y"]
+    for country in COUNTRIES:
+
+        y = {}
+        for t in tenors:
+            val = data["yields"].get(t, {}).get(country)
+            y[t] = float(val) if val is not None else None
+
+        if all(v is None for v in y.values()):
+            continue
+
+        ynum = {2: y["2Y"], 5: y["5Y"], 10: y["10Y"], 30: y["30Y"]}
+
+        def interp(n_lo, n_hi, n_target):
+            lo, hi = ynum.get(n_lo), ynum.get(n_hi)
+            if lo is None or hi is None:
+                return None
+            return lo + (n_target - n_lo) / (n_hi - n_lo) * (hi - lo)
+
+        y_aged = {
+            "2Y":  (y["2Y"] - (y["5Y"] - y["2Y"]) / 3.0
+                    if y["2Y"] is not None and y["5Y"] is not None else None),
+            "5Y":  interp(2,  5,   4),
+            "10Y": interp(5,  10,  9),
+            "30Y": interp(10, 30, 29),
+        }
+
+        # Per-country hedge cost (same for all tenors — it's a 3M FX hedge)
+        # Base-currency country (e.g. Japan in JPY mode) has zero hedge cost by definition
+        if country in zero_hc:
+            hc_pct = 0.0
+        else:
+            hc_pct = hcosts.get(country)      # None when unhedged or BBG unavailable
+        hc_bps = round(hc_pct * 100, 1) if hc_pct is not None else None
+
+        for tenor in tenors:
+            yld = y[tenor]
+            if yld is None:
+                continue
+            dur = _CARRY_DUR[tenor]
+
+            # Carry: apply hedge cost if available, otherwise fall back to gross
+            if hc_pct is not None:
+                carry_bps = round((yld + hc_pct) * 100, 1)
+            else:
+                carry_bps = round(yld * 100, 1)
+
+            aged = y_aged[tenor]
+            if aged is not None:
+                roll_dy_pct  = yld - aged
+                roll_dy_bps  = round(roll_dy_pct * 100, 1)
+                roll_ret_bps = round(dur * roll_dy_pct * 100, 1)
+            else:
+                roll_dy_bps = roll_ret_bps = None
+
+            total_bps = (round(carry_bps + roll_ret_bps, 1)
+                         if roll_ret_bps is not None else None)
+
+            row = {
+                "Flag":           FLAGS.get(country, ""),
+                "Country":        country,
+                "Tenor":          tenor,
+                "Yield (%)":      round(yld, 3),
+                "Carry (bps)":    carry_bps,
+                "Roll Δy (bps)":  roll_dy_bps  if roll_dy_bps  is not None else "N/A",
+                "Roll Ret (bps)": roll_ret_bps if roll_ret_bps is not None else "N/A",
+                "Total 1Y (bps)": total_bps    if total_bps    is not None else "N/A",
+                "_total_sort":    total_bps    if total_bps    is not None else -9999,
+            }
+            if hedge_base != "unhedged":
+                row["Hedge Cost (bps)"] = hc_bps if hc_bps is not None else "N/A"
+            rows.append(row)
+
+    rows.sort(key=lambda r: r["_total_sort"], reverse=True)
+    for i, r in enumerate(rows, 1):
+        r["Rank"] = i
+    return rows
+
+
+def build_carry_charts_panel(data: Dict, hedge_base: str = "unhedged") -> html.Div:
+    """
+    Returns the two carry/roll-down bar charts:
+      • Grouped by Country (tenor = series)
+      • Grouped by Tenor (sorted descending within each group)
+    """
+    rows = compute_carry_rolldown(data, hedge_base)
+    if not rows:
+        return html.P("No yield data — connect Bloomberg.",
+                      style={"color": TEXT_MUT, "fontFamily": FONT_FAMILY,
+                             "padding": "20px", "textAlign": "center"})
+
+    _hlabel = {"jpy": " — JPY Hedged", "sgd": " — SGD Hedged"}.get(hedge_base, "")
+
+    # ── Chart 1: grouped by country (tenor = series) ─────────────────────
+    tenor_order = ["2Y", "5Y", "10Y", "30Y"]
+    fig1 = go.Figure()
+    bar_colors = {"2Y": "#60A5FA", "5Y": "#34D399", "10Y": "#FBBF24", "30Y": "#F87171"}
+    for tenor in tenor_order:
+        tenor_rows = [r for r in rows if r["Tenor"] == tenor
+                      and isinstance(r["_total_sort"], (int, float))]
+        tenor_rows_sorted = sorted(tenor_rows, key=lambda r: r["_total_sort"], reverse=True)
+        fig1.add_trace(go.Bar(
+            name=tenor,
+            x=[f"{r['Flag']} {r['Country']}" for r in tenor_rows_sorted],
+            y=[r["_total_sort"] for r in tenor_rows_sorted],
+            marker_color=bar_colors[tenor],
+            text=[f"{r['_total_sort']:.0f}" for r in tenor_rows_sorted],
+            textposition="outside",
+            textfont=dict(size=9, family=FONT_FAMILY),
+        ))
+    fig1.update_layout(
+        title=f"Grouped by Country{_hlabel}",
+        barmode="group", yaxis_title="bps",
+        legend=dict(orientation="h", y=1.08, x=0, font=dict(size=9,
+                    family=FONT_FAMILY)),
+        height=300, margin=dict(t=50, b=40),
+    )
+
+    # ── Chart 2: tenor groups, sorted descending within each group ───────
+    # Insert GAP_WIDTH empty slots between tenor groups so they visually
+    # separate without needing separator lines.
+    GAP_WIDTH = 2
+    x_idx, y_vals2, bar_clrs2, tick_txt, bar_txt2, hover_txt2 = [], [], [], [], [], []
+    shapes, annotations2 = [], []
+    cursor = 0
+    for i, tenor in enumerate(tenor_order):
+        tenor_rows = [r for r in rows if r["Tenor"] == tenor
+                      and isinstance(r["_total_sort"], (int, float))]
+        sorted_grp = sorted(tenor_rows, key=lambda r: r["_total_sort"], reverse=True)
+        n = len(sorted_grp)
+        # Tenor label centred over the group
+        annotations2.append(dict(
+            x=cursor + (n - 1) / 2, y=1.05,
+            xref="x", yref="paper",
+            text=f"<b>{tenor}</b>",
+            showarrow=False,
+            font=dict(size=11, color=ACCENT, family=FONT_FAMILY),
+        ))
+        for r in sorted_grp:
+            x_idx.append(cursor)
+            y_vals2.append(r["_total_sort"])
+            bar_clrs2.append(CCOLORS.get(r["Country"], TEXT_MUT))
+            tick_txt.append(f"{r['Flag']} {r['Country']}")
+            bar_txt2.append(f"{r['_total_sort']:.0f}")
+            hover_txt2.append(
+                f"<b>{r['Flag']} {r['Country']} {r['Tenor']}</b><br>"
+                f"Total 1Y: {r['_total_sort']:.0f} bps<extra></extra>"
+            )
+            cursor += 1
+        # Advance cursor by GAP_WIDTH before next group (skip last)
+        if i < len(tenor_order) - 1:
+            cursor += GAP_WIDTH
+
+    fig2 = go.Figure()
+    fig2.add_trace(go.Bar(
+        x=x_idx, y=y_vals2,
+        marker_color=bar_clrs2,
+        text=bar_txt2, textposition="outside",
+        textfont=dict(size=9, family=FONT_FAMILY),
+        showlegend=False,
+        hovertemplate=hover_txt2,
+    ))
+    # Dummy traces for country legend
+    for country in COUNTRIES:
+        if any(r["Country"] == country for r in rows):
+            fig2.add_trace(go.Bar(
+                x=[None], y=[None],
+                name=f"{FLAGS.get(country,'')} {country}",
+                marker_color=CCOLORS.get(country, TEXT_MUT),
+                showlegend=True,
+            ))
+
+    fig2.update_layout(
+        title=f"Grouped by Tenor{_hlabel}  (sorted descending within each group)",
+        yaxis_title="bps",
+        xaxis=dict(
+            tickmode="array", tickvals=x_idx, ticktext=tick_txt,
+            tickangle=-35, tickfont=dict(size=9, family=FONT_FAMILY),
+            range=[-0.5, cursor - GAP_WIDTH - 0.5],
+        ),
+        annotations=annotations2,
+        legend=dict(orientation="h", y=1.12, x=0,
+                    font=dict(size=9, family=FONT_FAMILY)),
+        height=340, margin=dict(t=60, b=60),
+        barmode="relative",
+    )
+
+    return html.Div([
+        dbc.Row([
+            dbc.Col(dcc.Graph(figure=_dark(fig1), config=GRAPH_CFG), width=6),
+            dbc.Col(dcc.Graph(figure=_dark(fig2), config=GRAPH_CFG), width=6),
+        ]),
+    ])
+
+
+def build_carry_rolldown_panel(data: Dict, hedge_base: str = "unhedged") -> html.Div:
+    """Returns the ranked carry/roll-down DataTable (no charts)."""
+    rows = compute_carry_rolldown(data, hedge_base)
+    if not rows:
+        return html.P("No yield data — connect Bloomberg.",
+                      style={"color": TEXT_MUT, "fontFamily": FONT_FAMILY,
+                             "padding": "20px", "textAlign": "center"})
+
+    base_cols = ["Rank", "Country", "Tenor", "Yield (%)"]
+    if hedge_base != "unhedged":
+        base_cols.append("Hedge Cost (bps)")
+    base_cols += ["Carry (bps)", "Roll Δy (bps)", "Roll Ret (bps)", "Total 1Y (bps)"]
+    display_cols = base_cols
+    tbl_rows = [{c: (f"{r['Flag']} {r['Country']}" if c == "Country" else r.get(c, "N/A"))
+                 for c in display_cols}
+                for r in rows]
+
+    total_vals = [r["_total_sort"] for r in rows]
+    v_max = max(total_vals) if total_vals else 1
+    v_min = min(total_vals) if total_vals else 0
+
+    def _cell_color(val):
+        if not isinstance(val, (int, float)):
+            return {}
+        rng = max(v_max - v_min, 1)
+        norm = (val - v_min) / rng
+        if norm >= 0.6:
+            return {"backgroundColor": "rgba(34,197,94,0.18)", "color": GREEN}
+        if norm <= 0.25:
+            return {"backgroundColor": "rgba(239,68,68,0.15)", "color": RED}
+        return {}
+
+    style_data_cond = []
+    for i, r in enumerate(rows):
+        clr = _cell_color(r["_total_sort"])
+        if clr:
+            style_data_cond.append({
+                "if": {"row_index": i, "column_id": "Total 1Y (bps)"},
+                **clr,
+            })
+        roll = r.get("Roll Δy (bps)")
+        if isinstance(roll, (int, float)):
+            roll_clr = ({"backgroundColor": "rgba(34,197,94,0.10)", "color": GREEN}
+                        if roll >= 0
+                        else {"backgroundColor": "rgba(239,68,68,0.10)", "color": RED})
+            style_data_cond.append({
+                "if": {"row_index": i, "column_id": "Roll Δy (bps)"},
+                **roll_clr,
+            })
+
+    table = dash_table.DataTable(
+        data=tbl_rows,
+        columns=[{"name": c, "id": c} for c in display_cols],
+        sort_action="native",
+        style_table={"overflowX": "auto", "backgroundColor": BG_DEEP,
+                     "border": f"1px solid {BORDER}", "borderRadius": "6px"},
+        style_cell={
+            "backgroundColor": BG_DEEP, "color": TEXT,
+            "border": f"1px solid {BORDER}",
+            "fontFamily": FONT_FAMILY, "fontSize": "12px",
+            "textAlign": "center", "padding": "8px 10px",
+        },
+        style_header={
+            "backgroundColor": BG_CARD2, "color": ACCENT,
+            "fontWeight": "bold", "border": f"1px solid {BORDER_LT}",
+            "fontFamily": FONT_FAMILY, "fontSize": "11px",
+            "textAlign": "center", "padding": "8px 10px",
+        },
+        style_data_conditional=style_data_cond,
+        page_size=len(tbl_rows),
+    )
+
+    return html.Div(dbc.Row([dbc.Col(table, width=12)]))
+
+
+# ==========================================================================
 #  TAB LAYOUTS
 # ==========================================================================
 
 # ── Tab 1: Investment Ideas ───────────────────────────────────────────────
 tab_ideas = dbc.Tab(label="💡 Ideas", tab_id="t-ideas", children=[
     html.Div(className="p-3", children=[
+
+        # ── Hedge Perspective Toggle ──────────────────────────────────────
+        dbc.Row([
+            dbc.Col(
+                html.Div([
+                    html.Span("Hedge Perspective:",
+                              style={"color": TEXT_MUT, "fontSize": "11px",
+                                     "fontFamily": FONT_FAMILY, "marginRight": "10px",
+                                     "verticalAlign": "middle"}),
+                    dbc.RadioItems(
+                        id="ideas-hedge-toggle",
+                        options=[
+                            {"label": "Unhedged", "value": "unhedged"},
+                            {"label": "JPY Hedged", "value": "jpy"},
+                            {"label": "SGD Hedged", "value": "sgd"},
+                        ],
+                        value="unhedged",
+                        inline=True,
+                        style={"fontFamily": FONT_FAMILY, "fontSize": "11px",
+                               "display": "inline-block"},
+                        inputStyle={"marginRight": "4px"},
+                        labelStyle={"marginRight": "16px", "color": TEXT},
+                    ),
+                ], style={"display": "flex", "alignItems": "center",
+                          "backgroundColor": BG_CARD,
+                          "border": f"1px solid {BORDER}",
+                          "borderRadius": "6px", "padding": "8px 14px"}),
+                width="auto",
+            ),
+        ], className="mb-3"),
+
+        # ── 1. Multi-Signal Conviction Scorecard ──────────────────────────
+        SEC_TITLE("Multi-Signal Conviction Scorecard",
+                  "5-signal composite score (–10 to +10) per country: CPI surprise, PMI surprise, "
+                  "yield z-score vs 5Y history, OIS-implied policy path, carry rank (hedge-adjusted). "
+                  "Positive = bullish bond (buy); Negative = bearish bond (sell)."),
+        html.Div(id="scorecard-container",
+                 children=build_scorecard_panel(INITIAL_DATA)),
+        html.Hr(style={"borderColor": BORDER, "margin": "20px 0"}),
+
+        # ── 2. Carry + Roll-Down Charts ───────────────────────────────────
+        SEC_TITLE("1Y Carry + Roll-Down by Country & Tenor",
+                  "Grouped by Country (left) and by Tenor (right). "
+                  "Bars sorted descending within each tenor group. Values in bps."),
+        html.Div(id="carry-charts-container",
+                 children=build_carry_charts_panel(INITIAL_DATA)),
+        html.Hr(style={"borderColor": BORDER, "margin": "20px 0"}),
+
+        # ── 3. Investment Idea Screener ───────────────────────────────────
         dbc.Row([
             dbc.Col(SEC_TITLE(
                 "Investment Idea Screener",
@@ -4985,6 +5686,8 @@ tab_ideas = dbc.Tab(label="💡 Ideas", tab_id="t-ideas", children=[
         html.Div(id="ideas-container",
                  children=build_ideas_datatable(_safe_ideas(INITIAL_DATA))),
         html.Hr(style={"borderColor": BORDER, "margin": "20px 0"}),
+
+        # ── 4. Scoring Methodology + Hedged Yield charts ──────────────────
         SEC_TITLE("Scoring Methodology",
                   "Each idea is scored across 6 factors — higher absolute score = higher conviction"),
         dbc.Row([
@@ -5020,6 +5723,23 @@ tab_ideas = dbc.Tab(label="💡 Ideas", tab_id="t-ideas", children=[
             dbc.Col(dcc.Graph(id="hg-table", figure=_safe_chart(chart_hedge_table, INITIAL_DATA),
                               config=GRAPH_CFG, style={"height": "260px"}), width=12),
         ], className="mt-2"),
+        html.Hr(style={"borderColor": BORDER, "margin": "20px 0"}),
+
+        # ── 5. Carry & Roll-Down Table ────────────────────────────────────
+        SEC_TITLE("Carry & Roll-Down Table",
+                  "1Y total return = carry (income) + roll-down (price gain as bond ages along the curve). "
+                  "Roll Δy = expected yield drop in 1Y via interpolation. Green = high return, Red = low/negative."),
+        html.Div(id="carry-table-container",
+                 children=build_carry_rolldown_panel(INITIAL_DATA)),
+        html.Hr(style={"borderColor": BORDER, "margin": "20px 0"}),
+
+        # ── 6. Macro Surprise Score ───────────────────────────────────────
+        SEC_TITLE("Macro Surprise Score",
+                  "CPI deviation from central bank target (±2 pts) + PMI vs 50 (±2 pts). "
+                  "Positive = inflation above target or growth expansionary (bearish bonds); "
+                  "Negative = below target or contraction (bullish bonds)."),
+        html.Div(id="macro-surprise-container",
+                 children=build_macro_surprise_panel(INITIAL_DATA)),
     ])
 ])
 
@@ -6108,17 +6828,17 @@ tab_fwd = dbc.Tab(label="⏩ Fwd Rates", tab_id="t-fwd", children=[
             dbc.Col(country_checklist("fwd"), width=4),
         ], className="mb-3", align="center"),
         dbc.Row([
-            dbc.Col(dcc.Graph(id="fwd-bar",
-                              figure=_safe_chart(chart_fwd_bar, INITIAL_DATA),
-                              config=GRAPH_CFG, style={"height": "300px"}), width=6),
-            dbc.Col(dcc.Graph(id="fwd-premium",
-                              figure=_safe_chart(chart_fwd_premium, INITIAL_DATA),
-                              config=GRAPH_CFG, style={"height": "300px"}), width=6),
-        ], className="mb-2"),
-        dbc.Row([
             dbc.Col(dcc.Graph(id="fwd-curve",
                               figure=_safe_chart(chart_fwd_curve, INITIAL_DATA),
-                              config=GRAPH_CFG, style={"height": "400px"}), width=12),
+                              config=GRAPH_CFG, style={"height": "400px"}), width=8),
+            dbc.Col(dcc.Graph(id="fwd-premium",
+                              figure=_safe_chart(chart_fwd_premium, INITIAL_DATA),
+                              config=GRAPH_CFG, style={"height": "400px"}), width=4),
+        ], className="mb-2"),
+        dbc.Row([
+            dbc.Col(dcc.Graph(id="fwd-bar",
+                              figure=_safe_chart(chart_fwd_bar, INITIAL_DATA),
+                              config=GRAPH_CFG, style={"height": "300px"}), width=12),
         ]),
         html.Hr(style={"borderColor": BORDER, "margin": "14px 0"}),
         dbc.Row([
@@ -6237,6 +6957,16 @@ tab_cb_path = dbc.Tab(label="🏦 CB Path", tab_id="t-cb-path", children=[
 ])
 
 # ── Tab 8: Ticker Reference ───────────────────────────────────────────────
+# _XCCY_JPY_PAIR_MAP and _XCCY_SGD_PAIR_MAP are defined near the data layer
+# (after SGD_3M_RATE_TICKER) and reused here for the ticker reference table.
+
+_TBL_CELL  = {"backgroundColor": BG_DEEP, "color": TEXT, "border": f"1px solid {BORDER}",
+               "padding": "5px 8px", "fontSize": "11px", "fontFamily": FONT_FAMILY}
+_TBL_HDR   = {"backgroundColor": BG_CARD2, "color": ACCENT, "fontWeight": "bold",
+               "border": f"1px solid {BORDER_LT}", "fontFamily": FONT_FAMILY}
+_TBL_STYLE = {"overflowX": "auto", "backgroundColor": BG_DEEP}
+_VERIFY_COND = [{"if": {"filter_query": '{Status} contains "Verify"'}, "color": YELLOW}]
+
 tab_tickers = dbc.Tab(label="🔧 Tickers", tab_id="t-tickers", children=[
     html.Div(className="p-3", children=[
         dbc.Alert([
@@ -6244,82 +6974,191 @@ tab_tickers = dbc.Tab(label="🔧 Tickers", tab_id="t-tickers", children=[
             "Tickers marked ⚠️ need terminal verification. "
             "Use BBG functions: DES <ticker> → to verify, SRCH → to find alternatives.",
         ], color="info", style={"fontSize": "11px", "fontFamily": FONT_FAMILY}),
+
+        # ── Row 1: Sovereign Yields | Macro ──────────────────────────────
         dbc.Row([
             dbc.Col([
-                html.H6("Sovereign Yield Tickers", style={"color": ACCENT, "fontFamily": FONT_FAMILY,
-                                                            "fontSize": "12px"}),
+                html.H6("Sovereign Yield Tickers",
+                        style={"color": ACCENT, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
                 dash_table.DataTable(
                     data=[{"Tenor": t, "Country": c, "BBG Ticker": tkr, "Status": "✅"}
                            for t, tm in YIELD_TICKERS.items()
                            for c, tkr in tm.items()],
-                    columns=[{"name": col, "id": col} for col in ["Tenor","Country","BBG Ticker","Status"]],
-                    style_table={"overflowX":"auto","backgroundColor":BG_DEEP},
-                    style_cell={"backgroundColor":BG_DEEP,"color":TEXT,"border":f"1px solid {BORDER}",
-                                "padding":"5px 8px","fontSize":"11px","fontFamily":FONT_FAMILY},
-                    style_header={"backgroundColor":BG_CARD2,"color":ACCENT,"fontWeight":"bold",
-                                  "border":f"1px solid {BORDER_LT}","fontFamily":FONT_FAMILY},
-                    style_data_conditional=[
-                        {"if":{"filter_query":'{Status} contains "Verify"'},"color":YELLOW}
-                    ],
+                    columns=[{"name": col, "id": col} for col in ["Tenor", "Country", "BBG Ticker", "Status"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
+                    style_data_conditional=_VERIFY_COND,
                     page_size=12,
                 )
             ], width=6),
             dbc.Col([
-                html.H6("Macro Tickers", style={"color": ACCENT, "fontFamily": FONT_FAMILY,
-                                                 "fontSize": "12px"}),
+                html.H6("Macro Tickers (CPI, PMI, Policy Rate, Breakeven)",
+                        style={"color": ACCENT, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
                 dash_table.DataTable(
                     data=[{"Category": cat, "Country": c, "BBG Ticker": tkr}
                            for cat, tm in MACRO_TICKERS.items()
                            for c, tkr in tm.items()],
-                    columns=[{"name": col,"id": col} for col in ["Category","Country","BBG Ticker"]],
-                    style_table={"overflowX":"auto","backgroundColor":BG_DEEP},
-                    style_cell={"backgroundColor":BG_DEEP,"color":TEXT,"border":f"1px solid {BORDER}",
-                                "padding":"5px 8px","fontSize":"11px","fontFamily":FONT_FAMILY},
-                    style_header={"backgroundColor":BG_CARD2,"color":ACCENT,"fontWeight":"bold",
-                                  "border":f"1px solid {BORDER_LT}","fontFamily":FONT_FAMILY},
+                    columns=[{"name": col, "id": col} for col in ["Category", "Country", "BBG Ticker"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
                     page_size=12,
                 )
             ], width=6),
         ]),
+
+        # ── Row 2: FX | XCcy Basis (actual tickers) ──────────────────────
         dbc.Row([
             dbc.Col([
-                html.H6("FX & XCcy Basis Tickers",
+                html.H6("FX vs JPY Tickers",
                         style={"color": ACCENT, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
                 dash_table.DataTable(
+                    data=[{"Pair": p, "BBG Ticker": t, "Status": "✅"}
+                           for p, t in FX_TICKERS.items()],
+                    columns=[{"name": c, "id": c} for c in ["Pair", "BBG Ticker", "Status"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
+                    style_data_conditional=_VERIFY_COND,
+                )
+            ], width=3),
+            dbc.Col([
+                html.H6("XCcy Basis vs JPY — actual tickers queried",
+                        style={"color": ACCENT, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
+                html.P("Basis = JPYI3M Curncy minus foreign 3M rate (computed in Python)",
+                       style={"color": TEXT_MUT, "fontSize": "10px", "fontFamily": FONT_FAMILY,
+                              "marginBottom": "4px"}),
+                dash_table.DataTable(
                     data=(
-                        [{"Type":"FX vs JPY","Pair":p,"BBG Ticker":t,"Status":"✅"}
-                          for p,t in FX_TICKERS.items()] +
-                        [{"Type":"XCcy Basis 3M","Pair":p,"BBG Ticker":t,"Status":"✅"}
-                          for p,t in XCCY_BASIS_TICKERS.items()]
+                        [{"Pair": p, "Foreign 3M Ticker": t, "JPY Rate": JPY_3M_RATE_TICKER,
+                          "Status": "✅"}
+                          for p, t in _XCCY_JPY_PAIR_MAP.items()]
                     ),
-                    columns=[{"name": c,"id": c} for c in ["Type","Pair","BBG Ticker","Status"]],
-                    style_table={"overflowX":"auto","backgroundColor":BG_DEEP},
-                    style_cell={"backgroundColor":BG_DEEP,"color":TEXT,"border":f"1px solid {BORDER}",
-                                "padding":"5px 8px","fontSize":"11px","fontFamily":FONT_FAMILY},
-                    style_header={"backgroundColor":BG_CARD2,"color":ACCENT,"fontWeight":"bold",
-                                  "border":f"1px solid {BORDER_LT}","fontFamily":FONT_FAMILY},
-                    style_data_conditional=[
-                        {"if":{"filter_query":'{Status} contains "Verify"'},"color":YELLOW}
-                    ],
+                    columns=[{"name": c, "id": c}
+                              for c in ["Pair", "Foreign 3M Ticker", "JPY Rate", "Status"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
+                    style_data_conditional=_VERIFY_COND,
+                )
+            ], width=5),
+            dbc.Col([
+                html.H6("XCcy Basis vs SGD — actual tickers queried",
+                        style={"color": ACCENT, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
+                html.P("Basis = SGDI3M Curncy minus foreign 3M rate (computed in Python)",
+                       style={"color": TEXT_MUT, "fontSize": "10px", "fontFamily": FONT_FAMILY,
+                              "marginBottom": "4px"}),
+                dash_table.DataTable(
+                    data=(
+                        [{"Pair": p, "Foreign 3M Ticker": t, "SGD Rate": SGD_3M_RATE_TICKER,
+                          "Status": "✅"}
+                          for p, t in _XCCY_SGD_PAIR_MAP.items()]
+                    ),
+                    columns=[{"name": c, "id": c}
+                              for c in ["Pair", "Foreign 3M Ticker", "SGD Rate", "Status"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
+                    style_data_conditional=_VERIFY_COND,
+                )
+            ], width=4),
+        ], className="mt-3"),
+
+        # ── Row 3: JPY Hedge Cost | SGD Hedge Cost ────────────────────────
+        dbc.Row([
+            dbc.Col([
+                html.H6("JPY Hedge Cost Tickers",
+                        style={"color": ACCENT, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
+                html.P(f"JPY 3M base rate: {JPY_3M_RATE_TICKER}  |  Hedge cost = JPY 3M − foreign 3M",
+                       style={"color": TEXT_MUT, "fontSize": "10px", "fontFamily": FONT_FAMILY,
+                              "marginBottom": "4px"}),
+                dash_table.DataTable(
+                    data=(
+                        [{"Country": c, "Foreign 3M Ticker": tkr, "Status": "✅"}
+                          for c, tkr in JPY_HEDGE_COST_TICKERS.items()] +
+                        [{"Country": "Japan (base)", "Foreign 3M Ticker": JPY_3M_RATE_TICKER,
+                          "Status": "✅"}]
+                    ),
+                    columns=[{"name": c, "id": c} for c in ["Country", "Foreign 3M Ticker", "Status"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
+                    style_data_conditional=_VERIFY_COND,
                 )
             ], width=6),
             dbc.Col([
-                html.H6("⚠️ Tickers Requiring Manual Input / Terminal Verification",
+                html.H6("SGD Hedge Cost Tickers",
+                        style={"color": ACCENT, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
+                html.P(f"SGD 3M base rate: {SGD_3M_RATE_TICKER}  |  Hedge cost = SGD 3M − foreign 3M",
+                       style={"color": TEXT_MUT, "fontSize": "10px", "fontFamily": FONT_FAMILY,
+                              "marginBottom": "4px"}),
+                dash_table.DataTable(
+                    data=(
+                        [{"Country": c, "Foreign 3M Ticker": tkr, "Status": "✅"}
+                          for c, tkr in SGD_HEDGE_COST_TICKERS.items()] +
+                        [{"Country": "Singapore (base)", "Foreign 3M Ticker": SGD_3M_RATE_TICKER,
+                          "Status": "✅"}]
+                    ),
+                    columns=[{"name": c, "id": c} for c in ["Country", "Foreign 3M Ticker", "Status"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
+                    style_data_conditional=_VERIFY_COND,
+                )
+            ], width=6),
+        ], className="mt-3"),
+
+        # ── Row 4: Real Yields | Inflation Swaps ─────────────────────────
+        dbc.Row([
+            dbc.Col([
+                html.H6("Real Yield Tickers (TIPS / ILBs)",
+                        style={"color": ACCENT, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
+                dash_table.DataTable(
+                    data=[{"Tenor": t, "Country": c, "BBG Ticker": tkr,
+                           "Status": "✅" if c == "US" else "⚠️ Verify"}
+                           for t, tm in REAL_YIELD_TICKERS.items()
+                           for c, tkr in tm.items()],
+                    columns=[{"name": c, "id": c} for c in ["Tenor", "Country", "BBG Ticker", "Status"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
+                    style_data_conditional=_VERIFY_COND,
+                )
+            ], width=6),
+            dbc.Col([
+                html.H6("Inflation Swap Tickers (Zero-Coupon)",
+                        style={"color": ACCENT, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
+                dash_table.DataTable(
+                    data=[{"Tenor": t, "Region": r, "BBG Ticker": tkr,
+                           "Status": "✅" if r == "US" else "⚠️ Verify"}
+                           for t, rm in INFL_SWAP_TICKERS.items()
+                           for r, tkr in rm.items()],
+                    columns=[{"name": c, "id": c} for c in ["Tenor", "Region", "BBG Ticker", "Status"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
+                    style_data_conditional=_VERIFY_COND,
+                    page_size=10,
+                )
+            ], width=6),
+        ], className="mt-3"),
+
+        # ── Row 5: OIS Policy Path ────────────────────────────────────────
+        dbc.Row([
+            dbc.Col([
+                html.H6("OIS Policy Path Tickers  ⚠️ All require terminal verification",
                         style={"color": YELLOW, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
-                html.Div([
-                    html.Div(
-                        style={"backgroundColor": BG_DEEP, "border": f"1px solid {BORDER}",
-                               "borderLeft": f"3px solid {YELLOW}", "borderRadius": "4px",
-                               "padding": "6px 10px", "marginBottom": "4px"},
-                        children=[
-                            html.Span(name + ": ", style={"color": YELLOW, "fontWeight": "600",
-                                                           "fontSize": "10px", "fontFamily": FONT_FAMILY}),
-                            html.Span(tkr, style={"color": TEXT_MUT, "fontSize": "10px",
-                                                   "fontFamily": FONT_FAMILY}),
-                        ]
-                    )
-                    for name, tkr in TICKERS_NEEDING_VERIFICATION
-                ], style={"maxHeight": "340px", "overflowY": "auto"})
+                dash_table.DataTable(
+                    data=[{"CB": cb, "Tenor": tenor, "BBG Ticker": tkr, "Status": "⚠️ Verify"}
+                           for cb, tm in OIS_PATH_TICKERS.items()
+                           for tenor, tkr in tm.items()],
+                    columns=[{"name": c, "id": c} for c in ["CB", "Tenor", "BBG Ticker", "Status"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
+                    style_data_conditional=_VERIFY_COND,
+                    page_size=12,
+                )
+            ], width=6),
+            dbc.Col([
+                html.H6("Fiscal Balance & Debt-to-GDP Tickers  ⚠️ All require terminal verification",
+                        style={"color": YELLOW, "fontFamily": FONT_FAMILY, "fontSize": "12px"}),
+                dash_table.DataTable(
+                    data=(
+                        [{"Category": "Fiscal Balance (% GDP)", "Country": c, "BBG Ticker": tkr,
+                          "Status": "⚠️ Verify"}
+                          for c, tkr in FISCAL_GDP_TICKERS.items()] +
+                        [{"Category": "Govt Debt (% GDP)", "Country": c, "BBG Ticker": tkr,
+                          "Status": "⚠️ Verify"}
+                          for c, tkr in DEBT_GDP_TICKERS.items()]
+                    ),
+                    columns=[{"name": c, "id": c}
+                              for c in ["Category", "Country", "BBG Ticker", "Status"]],
+                    style_table=_TBL_STYLE, style_cell=_TBL_CELL, style_header=_TBL_HDR,
+                    style_data_conditional=_VERIFY_COND,
+                    page_size=12,
+                )
             ], width=6),
         ], className="mt-3"),
     ])
@@ -6367,6 +7206,10 @@ app.layout = html.Div(
         ]),
         # Store — pre-loaded once at startup, never re-fetched
         dcc.Store(id="store-data", data=INITIAL_DATA),
+        # Per-session UI state stores (thread-safe alternative to mutable function attrs)
+        dcc.Store(id="store-yield-state",  data={"tenor": "10Y", "days": 504}),
+        dcc.Store(id="store-spread-state", data={"tenor": "10Y", "days": 1260}),
+        dcc.Store(id="store-zscore-state", data={"days": 1260}),
         html.Div(
             style={"padding": "18px 20px", "borderTop": f"1px solid {BORDER}",
                    "marginTop": "30px", "color": TEXT_MUT, "fontSize": "10px",
@@ -6398,46 +7241,60 @@ def update_ideas(stored_data):
 
 
 @app.callback(
-    Output("yld-bar",   "figure"),
-    Output("yld-curve", "figure"),
-    Output("yld-hist",  "figure"),
-    Input("yld-2y",     "n_clicks"),
-    Input("yld-5y",     "n_clicks"),
-    Input("yld-10y",    "n_clicks"),
-    Input("yld-30y",    "n_clicks"),
-    Input("yld-hist-1y","n_clicks"),
-    Input("yld-hist-2y","n_clicks"),
-    Input("yld-hist-5y","n_clicks"),
-    Input("yld-countries","value"),
-    State("store-data",  "data"),
+    Output("scorecard-container",      "children"),
+    Output("carry-charts-container",   "children"),
+    Output("carry-table-container",    "children"),
+    Output("macro-surprise-container", "children"),
+    Input("store-data",                "data"),
+    Input("ideas-hedge-toggle",        "value"),
 )
-
-def update_yield_tab(n2, n5, n10, n30, h1y, h2y, h5y, countries, stored):
-
-    data = stored or INITIAL_DATA
-    ctx  = callback_context
-    tid  = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else "yld-10y"
-    tenor_map = {"yld-2y": "2Y", "yld-5y": "5Y", "yld-10y": "10Y", "yld-30y": "30Y"}
-    days_map  = {"yld-hist-1y": 252, "yld-hist-2y": 504, "yld-hist-5y": 1260}
-    # Persist state across different trigger types
-    if not hasattr(update_yield_tab, "_tenor"):
-        update_yield_tab._tenor = "10Y"
-    if not hasattr(update_yield_tab, "_days"):
-        update_yield_tab._days  = 504
-    if tid in tenor_map:
-        update_yield_tab._tenor = tenor_map[tid]
-    if tid in days_map:
-        update_yield_tab._days  = days_map[tid]
-    sel = countries or COUNTRIES
+def update_ideas_hedge(stored_data, hedge_base):
+    data = stored_data or INITIAL_DATA
+    hb   = hedge_base or "unhedged"
     return (
-        chart_yield_bar(data, update_yield_tab._tenor),
-        chart_yield_curve(data, sel),
-        chart_hist_yields(update_yield_tab._tenor, update_yield_tab._days, sel),
+        build_scorecard_panel(data, hb),
+        build_carry_charts_panel(data, hb),
+        build_carry_rolldown_panel(data, hb),
+        build_macro_surprise_panel(data),
     )
 
 
 @app.callback(
-    Output("sprd-compare-chart", "figure"),
+    Output("yld-bar",           "figure"),
+    Output("yld-curve",         "figure"),
+    Output("yld-hist",          "figure"),
+    Output("store-yield-state", "data"),
+    Input("yld-2y",      "n_clicks"),
+    Input("yld-5y",      "n_clicks"),
+    Input("yld-10y",     "n_clicks"),
+    Input("yld-30y",     "n_clicks"),
+    Input("yld-hist-1y", "n_clicks"),
+    Input("yld-hist-2y", "n_clicks"),
+    Input("yld-hist-5y", "n_clicks"),
+    Input("yld-countries", "value"),
+    State("store-data",        "data"),
+    State("store-yield-state", "data"),
+)
+def update_yield_tab(n2, n5, n10, n30, h1y, h2y, h5y, countries, stored, yld_state):
+    data      = stored or INITIAL_DATA
+    yld_state = yld_state or {"tenor": "10Y", "days": 504}
+    tid       = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else ""
+    tenor_map = {"yld-2y": "2Y", "yld-5y": "5Y", "yld-10y": "10Y", "yld-30y": "30Y"}
+    days_map  = {"yld-hist-1y": 252, "yld-hist-2y": 504, "yld-hist-5y": 1260}
+    tenor = tenor_map.get(tid, yld_state["tenor"])
+    days  = days_map.get(tid, yld_state["days"])
+    sel   = countries or COUNTRIES
+    return (
+        chart_yield_bar(data, tenor),
+        chart_yield_curve(data, sel),
+        chart_hist_yields(tenor, days, sel),
+        {"tenor": tenor, "days": days},
+    )
+
+
+@app.callback(
+    Output("sprd-compare-chart",  "figure"),
+    Output("store-spread-state",  "data"),
     Input("sprd-base-country",  "value"),
     Input("sprd-other-country", "value"),
     Input("sprd-t-2y",    "n_clicks"),
@@ -6452,30 +7309,25 @@ def update_yield_tab(n2, n5, n10, n30, h1y, h2y, h5y, countries, stored):
     Input("sprd-p-15y",   "n_clicks"),
     Input("sprd-p-20y",   "n_clicks"),
     Input("sprd-p-30y",   "n_clicks"),
+    State("store-spread-state", "data"),
 )
 def update_spread_compare(base, other,
                           _t2, _t5, _t10, _t30,
-                          _p1, _p2, _p3, _p5, _p10, _p15, _p20, _p30):
+                          _p1, _p2, _p3, _p5, _p10, _p15, _p20, _p30,
+                          sprd_state):
+    sprd_state = sprd_state or {"tenor": "10Y", "days": 1260}
     tenor_map  = {"sprd-t-2y": "2Y", "sprd-t-5y": "5Y",
                   "sprd-t-10y": "10Y", "sprd-t-30y": "30Y"}
     period_map = {"sprd-p-1y": 252, "sprd-p-2y": 504, "sprd-p-3y": 756,
                   "sprd-p-5y": 1260, "sprd-p-10y": 2520, "sprd-p-15y": 3780,
                   "sprd-p-20y": 5040, "sprd-p-30y": 7560}
-    if not hasattr(update_spread_compare, "_tenor"):
-        update_spread_compare._tenor = "10Y"
-    if not hasattr(update_spread_compare, "_days"):
-        update_spread_compare._days  = 1260
-    tid = (callback_context.triggered[0]["prop_id"].split(".")[0]
-           if callback_context.triggered else "")
-    if tid in tenor_map:
-        update_spread_compare._tenor = tenor_map[tid]
-    if tid in period_map:
-        update_spread_compare._days = period_map[tid]
-    return chart_yield_comparison(
-        base  or _SPRD_BASE_DEFAULT,
-        other or _SPRD_OTHER_DEFAULT,
-        update_spread_compare._tenor,
-        update_spread_compare._days,
+    tid   = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else ""
+    tenor = tenor_map.get(tid, sprd_state["tenor"])
+    days  = period_map.get(tid, sprd_state["days"])
+    return (
+        chart_yield_comparison(base or _SPRD_BASE_DEFAULT, other or _SPRD_OTHER_DEFAULT,
+                               tenor, days),
+        {"tenor": tenor, "days": days},
     )
 
 
@@ -6486,8 +7338,8 @@ def update_spread_compare(base, other,
     prevent_initial_call=True,
 )
 def update_sprd_heatmap_all_none(_all, _none):
-    tid = (callback_context.triggered[0]["prop_id"].split(".")[0]
-           if callback_context.triggered else "")
+    tid = (ctx.triggered[0]["prop_id"].split(".")[0]
+           if ctx.triggered else "")
     return COUNTRIES if tid == "sprd-heatmap-all" else []
 
 
@@ -6504,7 +7356,8 @@ def update_sprd_heatmap(countries_sel, stored):
 
 
 @app.callback(
-    Output("sprd-zscore-graph", "figure"),
+    Output("sprd-zscore-graph",   "figure"),
+    Output("store-zscore-state",  "data"),
     Input("sprd-heatmap-countries", "value"),
     Input("sprd-z-p-1y",   "n_clicks"),
     Input("sprd-z-p-2y",   "n_clicks"),
@@ -6514,24 +7367,25 @@ def update_sprd_heatmap(countries_sel, stored):
     Input("sprd-z-p-15y",  "n_clicks"),
     Input("sprd-z-p-20y",  "n_clicks"),
     Input("sprd-z-p-30y",  "n_clicks"),
-    State("store-data", "data"),
+    State("store-data",        "data"),
+    State("store-zscore-state", "data"),
     prevent_initial_call=True,
 )
 def update_sprd_zscore(countries_sel,
                        _p1, _p2, _p3, _p5, _p10, _p15, _p20, _p30,
-                       stored):
-    period_map = {"sprd-z-p-1y": 252, "sprd-z-p-2y": 504, "sprd-z-p-3y": 756,
-                  "sprd-z-p-5y": 1260, "sprd-z-p-10y": 2520, "sprd-z-p-15y": 3780,
-                  "sprd-z-p-20y": 5040, "sprd-z-p-30y": 7560}
-    if not hasattr(update_sprd_zscore, "_days"):
-        update_sprd_zscore._days = 1260
-    tid = (callback_context.triggered[0]["prop_id"].split(".")[0]
-           if callback_context.triggered else "")
-    if tid in period_map:
-        update_sprd_zscore._days = period_map[tid]
+                       stored, zscore_state):
+    zscore_state = zscore_state or {"days": 1260}
+    period_map   = {"sprd-z-p-1y": 252, "sprd-z-p-2y": 504, "sprd-z-p-3y": 756,
+                    "sprd-z-p-5y": 1260, "sprd-z-p-10y": 2520, "sprd-z-p-15y": 3780,
+                    "sprd-z-p-20y": 5040, "sprd-z-p-30y": 7560}
+    tid  = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else ""
+    days = period_map.get(tid, zscore_state["days"])
     data = stored or INITIAL_DATA
     sel  = countries_sel or COUNTRIES
-    return _safe_chart(chart_zscore_spread_heatmap, data, sel, update_sprd_zscore._days)
+    return (
+        _safe_chart(chart_zscore_spread_heatmap, data, sel, days),
+        {"days": days},
+    )
 
 # ==========================================================================
 # MACRO TIME SERIES EXPLORER — PERIOD BUTTON + CHART CALLBACKS
@@ -6549,7 +7403,6 @@ def update_macro_ts_period(*n_clicks):
     """
     When a period button is clicked, auto-set start and end dates.
     """
-    ctx = callback_context
     if not ctx.triggered:
         raise dash.exceptions.PreventUpdate
 
@@ -6590,7 +7443,6 @@ def highlight_macro_ts_period(*n_clicks):
     """
     Highlight the active period button (primary), dim the rest (secondary).
     """
-    ctx = callback_context
     if not ctx.triggered or all(n == 0 for n in n_clicks):
         # Default: 5Y is active
         return ["primary" if p == "5Y" else "secondary" for p in _MACRO_TS_PERIODS]
@@ -6960,7 +7812,7 @@ def update_bond_sim_outputs(country, tenor, horizon, parallel_bps, spread_bps,
     coupon_pct = float(_sv(coupon_input, y_s))
 
     maturity  = _BOND_TENOR_MATURITY.get(t, 10.0)
-    delta_bps = par + spd + pol
+    delta_bps = par + spd   # pol is scenario context only — not a yield shock
     roll_bps  = _bond_roll_bps(data, c, t, hm)
 
     result = compute_bond_scenario(
@@ -6986,7 +7838,7 @@ def update_bond_sim_outputs(country, tenor, horizon, parallel_bps, spread_bps,
     # Pass coupon override to country bar only if user explicitly set one
     coupon_ovr  = float(coupon_input) if coupon_input is not None else None
     country_bar = _safe_chart(chart_bond_sim_country_bar, data, t, hm,
-                               par + pol, spd, coupon_ovr)
+                               par + spd, 0.0, coupon_ovr)
 
     return waterfall, heatmap, summary, path_chart, country_bar
 
