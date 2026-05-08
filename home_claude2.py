@@ -122,6 +122,18 @@ MACRO_TICKERS = {
         "Canada":    "CGE9YOY Index",     # ✅ User verified
         "Singapore": "SGDPYOY Index",     # ✅ User verified
     },
+    "RETAIL_SALES_YOY": {
+        "US":        "VERIFY_IN_BBG Index",
+        "Australia": "VERIFY_IN_BBG Index",
+        "UK":        "VERIFY_IN_BBG Index",
+        "Euro Area": "VERIFY_IN_BBG Index",
+        "Germany":   "VERIFY_IN_BBG Index",
+        "France":    "VERIFY_IN_BBG Index",
+        "Italy":     "VERIFY_IN_BBG Index",
+        "Japan":     "VERIFY_IN_BBG Index",
+        "Canada":    "VERIFY_IN_BBG Index",
+        "Singapore": "VERIFY_IN_BBG Index",
+    },
     "UNEMPLOYMENT": {
         "US":        "EHUPUS Index",     # ✅
         "Australia": "AULFUNEM Index",    # ✅
@@ -232,6 +244,7 @@ MACRO_TICKERS = {
 _MACRO_TS_DISPLAY = {
     "CPI_YOY":        "CPI YoY (%)",
     "GDP_YOY":        "GDP YoY (%)",
+    "RETAIL_SALES_YOY": "Retail Sales YoY (%)",
     "UNEMPLOYMENT":   "Unemployment (%)",
     "PMI_MFG":        "PMI Mfg",
     "POLICY_RATE":    "Policy Rate (%)",
@@ -1210,7 +1223,16 @@ def compute_zscores(data: Dict, macro_history: Dict) -> Dict[str, Dict[str, floa
     REAL_RATE is a derived indicator (Policy Rate − CPI YoY).
     """
     zscores = {}
-    indicators = ["CPI_YOY", "GDP_YOY", "UNEMPLOYMENT", "PMI_MFG", "POLICY_RATE", "REAL_RATE", "CA_GDP"]
+    indicators = [
+        "CPI_YOY",
+        "GDP_YOY",
+        "RETAIL_SALES_YOY",
+        "UNEMPLOYMENT",
+        "PMI_MFG",
+        "POLICY_RATE",
+        "REAL_RATE",
+        "CA_GDP",
+    ]
     for ind in indicators:
         zscores[ind] = {}
         for country in COUNTRIES:
@@ -2164,8 +2186,26 @@ def chart_macro_heatmap(data: Dict, zscores: Dict = None, countries: List[str] =
         zscores = INITIAL_ZSCORES
     if not countries:
         countries = COUNTRIES
-    indicators = ["CPI_YOY", "GDP_YOY", "UNEMPLOYMENT", "PMI_MFG", "POLICY_RATE", "REAL_RATE", "CA_GDP"]
-    labels     = ["CPI YoY %", "GDP YoY %", "Unemp %", "PMI Mfg", "Policy Rate %", "Real Rate %", "Curr Acct % GDP"]
+    indicators = [
+        "CPI_YOY",
+        "GDP_YOY",
+        "RETAIL_SALES_YOY",
+        "UNEMPLOYMENT",
+        "PMI_MFG",
+        "POLICY_RATE",
+        "REAL_RATE",
+        "CA_GDP",
+    ]
+    labels = [
+        "CPI YoY %",
+        "GDP YoY %",
+        "Retail Sales YoY %",
+        "Unemp %",
+        "PMI Mfg",
+        "Policy Rate %",
+        "Real Rate %",
+        "Curr Acct % GDP",
+    ]
     z_matrix, text_matrix, hover_matrix = [], [], []
     for ind, label in zip(indicators, labels):
         z_row, t_row, h_row = [], [], []
@@ -2181,20 +2221,28 @@ def chart_macro_heatmap(data: Dict, zscores: Dict = None, countries: List[str] =
                 lookup = "ECB" if (c in ["Germany", "France", "Italy"] and ind == "POLICY_RATE") else c
                 val = data["macro"].get(ind, {}).get(lookup)
             zscore = zscores.get(ind, {}).get(c, np.nan)
-            z_row.append(zscore if not np.isnan(zscore) else None)
-            t_row.append(
-                f"{val:.1f}<br><span style='font-size:9px'>z={zscore:+.1f}</span>"
-                if val is not None and not np.isnan(zscore) else
-                (f"{val:.1f}" if val is not None else "N/A")
-            )
-            h_row.append(
-                f"<b>{FLAGS.get(c,'')} {c} — {label}</b><br>"
-                f"Current: {val:.2f}<br>"
-                f"Z-score: {zscore:+.2f} (vs 10Y avg)<br>"
-                f"{'Above' if zscore > 0 else 'Below'} 10Y avg by {abs(zscore):.1f}σ"
-                if val is not None and not np.isnan(zscore) else
-                f"<b>{c} — {label}</b><br>No data"
-            )
+            has_zscore = zscore is not None and not pd.isna(zscore)
+            z_row.append(zscore if has_zscore else None)
+            if val is None:
+                t_row.append("N/A")
+                h_row.append(f"<b>{c} — {label}</b><br>No data")
+            elif has_zscore:
+                t_row.append(
+                    f"{val:.1f}<br><span style='font-size:9px'>z={zscore:+.1f}</span>"
+                )
+                h_row.append(
+                    f"<b>{FLAGS.get(c,'')} {c} — {label}</b><br>"
+                    f"Current: {val:.2f}<br>"
+                    f"Z-score: {zscore:+.2f} (vs 10Y avg)<br>"
+                    f"{'Above' if zscore > 0 else 'Below'} 10Y avg by {abs(zscore):.1f}σ"
+                )
+            else:
+                t_row.append(f"{val:.1f}")
+                h_row.append(
+                    f"<b>{FLAGS.get(c,'')} {c} — {label}</b><br>"
+                    f"Current: {val:.2f}<br>"
+                    "Z-score: N/A (Bloomberg history unavailable)"
+                )
         z_matrix.append(z_row)
         text_matrix.append(t_row)
         hover_matrix.append(h_row)
@@ -5806,7 +5854,7 @@ tab_macro = dbc.Tab(label="🌍 Macro", tab_id="t-macro", children=[
                         id="macro-heatmap-graph",
                         figure=_safe_chart(chart_macro_heatmap, INITIAL_DATA, INITIAL_ZSCORES),
                         config=GRAPH_CFG,
-                        style={"height": "460px"},
+                        style={"height": "520px"},
                     ),
                 ]),
                 width=6,
