@@ -769,12 +769,31 @@ def tab_country_scorecard(data: Dict[str, Any], bucket: str = "All") -> html.Div
     countries = data.get("countries", [])
     if bucket != "All":
         countries = [r for r in countries if r.get("bucket") == bucket]
-    rows = sorted(countries, key=lambda r: safe_float(r.get("alpha_score")) or -1, reverse=True)
     keys = ["rank", "name", "bucket", "region", "alpha_score", "confidence", "momentum_score", "revision_score", "valuation_score", "quality_score", "risk_score", "macro_score", "fx_score"]
+    dm_rows = sorted([r for r in countries if r.get("bucket") == "DM"], key=lambda r: safe_float(r.get("alpha_score")) or -1, reverse=True)
+    em_rows = sorted([r for r in countries if r.get("bucket") == "EM"], key=lambda r: safe_float(r.get("alpha_score")) or -1, reverse=True)
+
+    def scorecard_group(rows: List[Dict[str, Any]], label: str) -> html.Div:
+        return html.Div([
+            panel(dcc.Graph(figure=bar_chart(rows, "name", "alpha_score", f"{label} Country Allocation Scores"), config=GRAPH_CFG), f"{label} Country Ranking"),
+            html.Div(style={"height": "12px"}),
+            panel(make_table(display_rows(rows, keys), [{"name": c.replace("_", " ").title(), "id": c} for c in keys]), f"{label} Signal Detail"),
+        ])
+
+    footnote = (
+        "Score methodology: raw Bloomberg fields are converted into cross-sectional z-scores across the country universe. "
+        "Higher is better for 3M momentum, 3M EPS revisions, ROE quality, PMI/growth, and 1M FX momentum; lower is better for forward P/E valuation and 30D volatility risk. "
+        "Signal scores are scaled as 50 + 18 x z-score and capped between 0 and 100. "
+        "The alpha score is the available-weight composite of momentum 18%, revisions 24%, valuation 16%, quality 12%, risk 10%, macro 12%, and FX 8%. "
+        "Confidence is the percent of the total signal weight with valid Bloomberg data; missing fields are shown as N/A and excluded from the composite."
+    )
+
     return html.Div([
-        panel(dcc.Graph(figure=bar_chart(rows, "name", "alpha_score", f"{bucket} Country Allocation Scores"), config=GRAPH_CFG), "Country Ranking"),
+        scorecard_group(dm_rows, "DM"),
+        html.Div(style={"height": "16px"}),
+        scorecard_group(em_rows, "EM"),
         html.Div(style={"height": "12px"}),
-        panel(make_table(display_rows(rows, keys), [{"name": c.replace("_", " ").title(), "id": c} for c in keys]), "Signal Detail"),
+        html.Div(footnote, style={"color": MUTED, "fontSize": "12px", "lineHeight": "1.45", "padding": "0 2px 4px"}),
     ])
 
 
