@@ -663,6 +663,45 @@ def bar_chart(rows: List[Dict[str, Any]], x: str, y: str, title: str, suffix: st
     return dark_fig(fig)
 
 
+def leadership_bar_chart(rows: List[Dict[str, Any]], y: str, title: str, suffix: str = "%", limit: int = 12) -> go.Figure:
+    df = df_from_rows(rows)
+    if df.empty or "name" not in df or y not in df:
+        return empty_fig("N/A - missing Bloomberg data")
+    df[y] = pd.to_numeric(df[y], errors="coerce")
+    df = df.dropna(subset=[y]).sort_values(y, ascending=False).head(limit).sort_values(y, ascending=True)
+    if df.empty:
+        return empty_fig("N/A - missing Bloomberg data")
+    fig = go.Figure(go.Bar(
+        x=df[y],
+        y=df["name"],
+        orientation="h",
+        marker_color=[pct_color(v) for v in df[y]],
+        text=[fmt(v, 1, suffix) for v in df[y]],
+        textposition="auto",
+        cliponaxis=False,
+        hovertemplate="<b>%{y}</b><br>%{x:.2f}%<extra></extra>",
+    ))
+    fig.update_layout(title=title, xaxis_title="Return", yaxis_title=None)
+    fig = dark_fig(fig, 440)
+    fig.update_layout(margin=dict(l=128, r=28, t=55, b=42))
+    return fig
+
+
+def return_matrix_rows(rows: List[Dict[str, Any]], metrics: List[Tuple[str, str]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    countries = [row.get("name") for row in rows if row.get("name")]
+    table_rows: List[Dict[str, Any]] = []
+    for key, label in metrics:
+        item: Dict[str, Any] = {"return_window": label}
+        for row in rows:
+            country = row.get("name")
+            if not country:
+                continue
+            item[country] = fmt(row.get(key), 1, "%")
+        table_rows.append(item)
+    columns = [{"name": "Return", "id": "return_window"}] + [{"name": country, "id": country} for country in countries]
+    return table_rows, columns
+
+
 def heatmap(rows: List[Dict[str, Any]], row_key: str, metrics: List[str], title: str) -> go.Figure:
     df = df_from_rows(rows)
     if df.empty:
@@ -755,13 +794,24 @@ def tab_idea_hub(data: Dict[str, Any]) -> html.Div:
 
 def tab_market_map(data: Dict[str, Any]) -> html.Div:
     countries = data.get("countries", [])
+    return_metrics = [
+        ("ret_1d", "1D"),
+        ("ret_1w", "1W"),
+        ("ret_1m", "1M"),
+        ("ret_3m", "3M"),
+        ("ret_ytd", "YTD"),
+        ("ret_1y", "1Y"),
+    ]
+    return_rows, return_columns = return_matrix_rows(countries, return_metrics)
     return html.Div([
         dbc.Row([
-            dbc.Col(panel(dcc.Graph(figure=bar_chart(countries, "name", "ret_1m", "Country Index 1M Returns", "%"), config=GRAPH_CFG), "1M Leadership"), md=6),
-            dbc.Col(panel(dcc.Graph(figure=bar_chart(countries, "name", "ret_ytd", "Country Index YTD Returns", "%"), config=GRAPH_CFG), "YTD Leadership"), md=6),
+            dbc.Col(panel(dcc.Graph(figure=leadership_bar_chart(countries, "ret_1m", "Country Index 1M Returns"), config=GRAPH_CFG), "1M Leadership"), md=6),
+            dbc.Col(panel(dcc.Graph(figure=leadership_bar_chart(countries, "ret_ytd", "Country Index YTD Returns"), config=GRAPH_CFG), "YTD Leadership"), md=6),
         ], className="g-3"),
         html.Div(style={"height": "12px"}),
-        panel(dcc.Graph(figure=heatmap(countries, "name", ["ret_1d", "ret_1w", "ret_1m", "ret_3m", "ret_ytd", "ret_1y"], "Global Country Return Map"), config=GRAPH_CFG), "Return Heatmap"),
+        panel(dcc.Graph(figure=heatmap(countries, "name", [key for key, _ in return_metrics], "Global Country Return Map"), config=GRAPH_CFG), "Return Heatmap"),
+        html.Div(style={"height": "12px"}),
+        panel(make_table(return_rows, return_columns, page_size=len(return_rows) or 6), "Return Table", "Countries are columns; return windows are rows."),
     ])
 
 
