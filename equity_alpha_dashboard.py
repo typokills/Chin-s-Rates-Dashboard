@@ -584,7 +584,22 @@ def kpi(label: str, value: str, color: str = TEXT) -> html.Div:
     ], style={"backgroundColor": PANEL, "border": f"1px solid {BORDER}", "borderRadius": "8px", "padding": "12px"})
 
 
-def make_table(rows: List[Dict[str, Any]], columns: List[Dict[str, str]], page_size: int = 12) -> dash_table.DataTable:
+def make_table(
+    rows: List[Dict[str, Any]],
+    columns: List[Dict[str, str]],
+    page_size: int = 12,
+    style_data_conditional: Optional[List[Dict[str, Any]]] = None,
+) -> dash_table.DataTable:
+    conditional_styles = [
+        {"if": {"filter_query": "{alpha_score} >= 65", "column_id": "alpha_score"}, "color": GREEN, "fontWeight": "bold"},
+        {"if": {"filter_query": "{alpha_score} <= 35", "column_id": "alpha_score"}, "color": RED, "fontWeight": "bold"},
+        {"if": {"filter_query": "{score} >= 65", "column_id": "score"}, "color": GREEN, "fontWeight": "bold"},
+        {"if": {"filter_query": "{score} <= 35", "column_id": "score"}, "color": RED, "fontWeight": "bold"},
+        {"if": {"filter_query": "{status} contains 'N/A'"}, "color": YELLOW},
+    ]
+    if style_data_conditional:
+        conditional_styles.extend(style_data_conditional)
+
     return dash_table.DataTable(
         data=rows,
         columns=columns,
@@ -605,14 +620,32 @@ def make_table(rows: List[Dict[str, Any]], columns: List[Dict[str, str]], page_s
             "maxWidth": "260px",
             "whiteSpace": "normal",
         },
-        style_data_conditional=[
-            {"if": {"filter_query": "{alpha_score} >= 65", "column_id": "alpha_score"}, "color": GREEN, "fontWeight": "bold"},
-            {"if": {"filter_query": "{alpha_score} <= 35", "column_id": "alpha_score"}, "color": RED, "fontWeight": "bold"},
-            {"if": {"filter_query": "{score} >= 65", "column_id": "score"}, "color": GREEN, "fontWeight": "bold"},
-            {"if": {"filter_query": "{score} <= 35", "column_id": "score"}, "color": RED, "fontWeight": "bold"},
-            {"if": {"filter_query": "{status} contains 'N/A'"}, "color": YELLOW},
-        ],
+        style_data_conditional=conditional_styles,
     )
+
+
+def score_heatmap_styles(columns: List[str]) -> List[Dict[str, Any]]:
+    styles: List[Dict[str, Any]] = []
+    bands = [
+        (75, 100, "rgba(37, 194, 110, 0.34)"),
+        (60, 75, "rgba(37, 194, 110, 0.22)"),
+        (50, 60, "rgba(37, 194, 110, 0.12)"),
+        (40, 50, "rgba(240, 82, 82, 0.12)"),
+        (25, 40, "rgba(240, 82, 82, 0.22)"),
+        (0, 25, "rgba(240, 82, 82, 0.34)"),
+    ]
+    for column in columns:
+        for low, high, color in bands:
+            if high == 100:
+                query = f"{{{column}}} >= {low} && {{{column}}} <= {high}"
+            else:
+                query = f"{{{column}}} >= {low} && {{{column}}} < {high}"
+            styles.append({
+                "if": {"filter_query": query, "column_id": column},
+                "backgroundColor": color,
+                "color": TEXT,
+            })
+    return styles
 
 
 def dark_fig(fig: go.Figure, height: int = 360) -> go.Figure:
@@ -770,15 +803,11 @@ def tab_country_scorecard(data: Dict[str, Any], bucket: str = "All") -> html.Div
     if bucket != "All":
         countries = [r for r in countries if r.get("bucket") == bucket]
     keys = ["rank", "name", "bucket", "region", "alpha_score", "confidence", "momentum_score", "revision_score", "valuation_score", "quality_score", "risk_score", "macro_score", "fx_score"]
+    score_keys = ["alpha_score", "momentum_score", "revision_score", "valuation_score", "quality_score", "risk_score", "macro_score", "fx_score"]
+    columns = [{"name": c.replace("_", " ").title(), "id": c} for c in keys]
+    score_styles = score_heatmap_styles(score_keys)
     dm_rows = sorted([r for r in countries if r.get("bucket") == "DM"], key=lambda r: safe_float(r.get("alpha_score")) or -1, reverse=True)
     em_rows = sorted([r for r in countries if r.get("bucket") == "EM"], key=lambda r: safe_float(r.get("alpha_score")) or -1, reverse=True)
-
-    def scorecard_group(rows: List[Dict[str, Any]], label: str) -> html.Div:
-        return html.Div([
-            panel(dcc.Graph(figure=bar_chart(rows, "name", "alpha_score", f"{label} Country Allocation Scores"), config=GRAPH_CFG), f"{label} Country Ranking"),
-            html.Div(style={"height": "12px"}),
-            panel(make_table(display_rows(rows, keys), [{"name": c.replace("_", " ").title(), "id": c} for c in keys]), f"{label} Signal Detail"),
-        ])
 
     footnote = (
         "Score methodology: raw Bloomberg fields are converted into cross-sectional z-scores across the country universe. "
@@ -789,9 +818,15 @@ def tab_country_scorecard(data: Dict[str, Any], bucket: str = "All") -> html.Div
     )
 
     return html.Div([
-        scorecard_group(dm_rows, "DM"),
-        html.Div(style={"height": "16px"}),
-        scorecard_group(em_rows, "EM"),
+        dbc.Row([
+            dbc.Col(panel(dcc.Graph(figure=bar_chart(dm_rows, "name", "alpha_score", "DM Country Allocation Scores"), config=GRAPH_CFG), "DM Country Ranking"), md=6),
+            dbc.Col(panel(dcc.Graph(figure=bar_chart(em_rows, "name", "alpha_score", "EM Country Allocation Scores"), config=GRAPH_CFG), "EM Country Ranking"), md=6),
+        ], className="g-3"),
+        html.Div(style={"height": "12px"}),
+        dbc.Row([
+            dbc.Col(panel(make_table(display_rows(dm_rows, keys), columns, style_data_conditional=score_styles), "DM Signal Detail"), md=6),
+            dbc.Col(panel(make_table(display_rows(em_rows, keys), columns, style_data_conditional=score_styles), "EM Signal Detail"), md=6),
+        ], className="g-3"),
         html.Div(style={"height": "12px"}),
         html.Div(footnote, style={"color": MUTED, "fontSize": "12px", "lineHeight": "1.45", "padding": "0 2px 4px"}),
     ])
